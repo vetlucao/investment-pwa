@@ -48,22 +48,25 @@ const store = {
   clear: () => { Object.values(KEYS).forEach(k => localStorage.removeItem(k)); },
 };
 
-// ── DEFAULT EMPTY PORTFOLIO TEMPLATE ────────────────────────────────────────
+// ── DEFAULT EMPTY PORTFOLIO TEMPLATE ─────────────────────────────────────────
 const EMPTY_PORTFOLIO = [
-  { id: 'a1', name: '', type: 'Fundo',        subtype: '', currency: 'BRL', invested: 0, current: 0, income: 0, returnPct: 0, returnType: 'gain', detail: '', risk: 'Risco Baixo',  maturity: '' },
-  { id: 'a2', name: '', type: 'Fundo',        subtype: '', currency: 'BRL', invested: 0, current: 0, income: 0, returnPct: 0, returnType: 'gain', detail: '', risk: 'Risco Alto',   maturity: '' },
-  { id: 'a3', name: '', type: 'Renda Fixa',   subtype: '', currency: 'BRL', invested: 0, current: 0, income: 0, returnPct: 0, returnType: 'gain', detail: '', risk: 'Risco Médio',  maturity: '' },
-  { id: 'a4', name: '', type: 'FII',          subtype: '', currency: 'BRL', invested: 0, current: 0, income: 0, returnPct: 0, returnType: 'gain', detail: '', risk: 'Risco Alto',   maturity: '' },
-  { id: 'a5', name: '', type: 'Internacional', subtype: '', currency: 'USD', invested: 0, current: 0, income: 0, returnPct: 0, returnType: 'gain', detail: '', risk: 'Risco Médio', maturity: '' },
+  { id: 'a1', name: 'Porto Seguro FIRF DI', type: 'Fundo', subtype: 'Renda Fixa Ref.', currency: 'BRL', invested: 9446.93, current: 12566.25, income: 3119.32, returnPct: 33.0, returnType: 'gain', detail: 'Rendimento acumulado: +R$ 3.119,32', risk: 'Risco Baixo', maturity: '' },
+  { id: 'a2', name: 'PIER11 – Pátria Infra Energia', type: 'Fundo', subtype: 'Infra / FIP-IE', currency: 'BRL', invested: 4935, current: 5018.13, income: 1214, returnPct: 28.0, returnType: 'gain', detail: 'Proventos acumulados: R$ 1.214,00 · 50 cotas · PM R$ 98,70', risk: 'Risco Alto', maturity: '' },
+  { id: 'a3', name: 'VGIE11 – Valora Infra Dívida', type: 'Fundo', subtype: 'Infra / FIP-IE', currency: 'BRL', invested: 5000, current: 4812.30, income: 1255, returnPct: 21.35, returnType: 'gain', detail: 'Proventos acumulados: R$ 1.255,00 · 500 cotas · PM R$ 10,00', risk: 'Risco Alto', maturity: '' },
+  { id: 'a4', name: 'CRA Vale do Pontal Fev/2031', type: 'Renda Fixa', subtype: 'CRA', currency: 'BRL', invested: 3057, current: 3040.63, income: 1048.34, returnPct: 0, returnType: 'gain', detail: 'CDI+1,90% · Rendimento acumulado: R$ 1.048,34', risk: 'Risco Médio', maturity: '17/02/2031' },
+  { id: 'a5', name: 'DEB Eneva Set/2032', type: 'Renda Fixa', subtype: 'Debênture', currency: 'BRL', invested: 3342.44, current: 3405.24, income: 630.58, returnPct: 0, returnType: 'gain', detail: 'IPCA+7,73% · Rendimento acumulado: R$ 630,58', risk: 'Risco Médio', maturity: '15/09/2032' },
+  { id: 'a6', name: 'CRA Raízen Ago/2037', type: 'Renda Fixa', subtype: 'CRA', currency: 'BRL', invested: 3442.04, current: 1392.56, income: -1598.60, returnPct: -59.5, returnType: 'warn', detail: 'IPCA+24,23% · Preço a mercado -59,5% mas taxa contratada até 2037', risk: 'Risco Alto', maturity: '17/08/2037' },
+  { id: 'a7', name: 'TGAR11 – TG Ativo Real FII', type: 'FII', subtype: 'Fundo Imobiliário', currency: 'BRL', invested: 5220.04, current: 3165.80, income: 1303.72, returnPct: -9.99, returnType: 'loss', detail: 'Proventos: R$ 1.303,72 · 44 cotas · PM R$ 118,66 → atual R$ 71,95', risk: 'Risco Alto', maturity: '' },
+  { id: 'a8', name: 'Aegea Saneamento (Bonds)', type: 'Internacional', subtype: 'Renda Fixa – Bonds', currency: 'USD', invested: 4760, current: 4852.50, income: 92.50, returnPct: 1.94, returnType: 'gain', detail: 'Juros acumulados: US$ 92,50 · 5 unidades', risk: 'Risco Médio', maturity: '20/05/2029' },
 ];
 
 const DEFAULT_PROFILE = {
-  name: '',
+  name: 'Lucas',
   risk: 'Moderado',
   horizon: 'Longo prazo (5+ anos)',
-  monthlyExpense: 0,
-  emergencyGoal: 0,
-  monthlyContribution: 0,
+  monthlyExpense: 20000,
+  emergencyGoal: 120000,
+  monthlyContribution: 10000,
 };
 
 // ── COLORS ───────────────────────────────────────────────────────────────────
@@ -339,18 +342,43 @@ function SetupScreen({ onComplete }) {
     onComplete();
   }
 
+
   const inp = (style) => ({ ...style, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '10px 12px', color: '#f1f5f9', fontSize: 13, outline: 'none', width: '100%' });
 
   if (step === 0) return (
-    <div style={{ minHeight: '100vh', background: '#080d18', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '32px 24px', animation: 'slideUp 0.4s ease' }}>
-      <div style={{ fontSize: 48, marginBottom: 24 }}>📊</div>
-      <div style={{ color: '#38bdf8', fontSize: 10, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", marginBottom: 12 }}>PAINEL DE INVESTIMENTOS</div>
-      <div style={{ color: '#f8fafc', fontSize: 24, fontWeight: 800, textAlign: 'center', lineHeight: 1.3, marginBottom: 16 }}>Seus dados ficam<br/>só no seu iPhone</div>
-      <div style={{ color: '#475569', fontSize: 13, textAlign: 'center', lineHeight: 1.7, marginBottom: 40, maxWidth: 320 }}>
-        Nenhuma informação financeira é enviada para servidores. Tudo fica salvo localmente no seu dispositivo.
+    <div style={{ minHeight: '100vh', background: '#080d18', padding: '48px 24px 40px', overflowY: 'auto', animation: 'slideUp 0.4s ease' }}>
+      <div style={{ textAlign: 'center', marginBottom: 28 }}>
+        <div style={{ fontSize: 44, marginBottom: 14 }}>📊</div>
+        <div style={{ color: '#38bdf8', fontSize: 9, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", marginBottom: 10 }}>PAINEL DE INVESTIMENTOS</div>
+        <div style={{ color: '#f8fafc', fontSize: 22, fontWeight: 800, lineHeight: 1.3, marginBottom: 8 }}>Tudo pré-carregado</div>
+        <div style={{ color: '#475569', fontSize: 12, lineHeight: 1.6 }}>Confirme e entre — seus dados ficam<br/>salvos apenas neste dispositivo.</div>
       </div>
-      <button onClick={() => setStep(1)} style={{ width: '100%', maxWidth: 320, padding: '16px', borderRadius: 12, background: 'linear-gradient(135deg, #38bdf8, #818cf8)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
-        Começar configuração →
+
+      <div style={{ background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.18)', borderRadius: 12, padding: '14px 16px', marginBottom: 10 }}>
+        <div style={{ color: '#38bdf8', fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", marginBottom: 10 }}>✓ Perfil</div>
+        {[['Nome', profile.name], ['Risco', profile.risk], ['Despesa mensal', 'R$ ' + Number(profile.monthlyExpense).toLocaleString('pt-BR')], ['Meta reserva', 'R$ ' + Number(profile.emergencyGoal).toLocaleString('pt-BR')], ['Aporte mensal', 'R$ ' + Number(profile.monthlyContribution).toLocaleString('pt-BR')]].map(([k,v]) => (
+          <div key={k} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+            <span style={{ color: '#475569', fontSize: 11 }}>{k}</span>
+            <span style={{ color: '#94a3b8', fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{v}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ background: 'rgba(74,222,128,0.05)', border: '1px solid rgba(74,222,128,0.15)', borderRadius: 12, padding: '14px 16px', marginBottom: 20 }}>
+        <div style={{ color: '#4ade80', fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", marginBottom: 10 }}>✓ {portfolio.length} ativos</div>
+        {portfolio.map(p => (
+          <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+            <span style={{ color: '#475569', fontSize: 11, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 8 }}>{p.name}</span>
+            <span style={{ color: p.returnPct < 0 ? '#f87171' : '#4ade80', fontSize: 11, fontFamily: "'DM Mono', monospace", flexShrink: 0 }}>{p.returnPct > 0 ? '+' : ''}{p.returnPct}%</span>
+          </div>
+        ))}
+      </div>
+
+      <button onClick={() => { store.set(KEYS.profile, profile); store.set(KEYS.portfolio, portfolio); setStep(2); }} style={{ width: '100%', padding: '16px', borderRadius: 12, background: 'linear-gradient(135deg, #38bdf8, #818cf8)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer', marginBottom: 10 }}>
+        ✓ Confirmar e entrar →
+      </button>
+      <button onClick={() => setStep(1)} style={{ width: '100%', padding: '12px', borderRadius: 12, background: 'transparent', border: '1px solid rgba(255,255,255,0.07)', color: '#334155', fontSize: 12, cursor: 'pointer' }}>
+        Editar manualmente
       </button>
     </div>
   );
