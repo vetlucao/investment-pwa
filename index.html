@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Investimentos" />
+  <meta name="theme-color" content="#080d18" />
+  <title>Painel de Investimentos</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #080d18; font-family: 'DM Sans', sans-serif; color: #f1f5f9; overscroll-behavior: none; }
+    #root { height: 100%; }
+    ::-webkit-scrollbar { width: 3px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    textarea, input { font-family: 'DM Sans', sans-serif; }
+    @keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:.8} }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes slideUp { from{opacity:0;transform:translateY(30px)} to{opacity:1;transform:translateY(0)} }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+
+// ── STORAGE HELPERS ──────────────────────────────────────────────────────────
+const KEYS = {
+  apiKey:    'inv_api_key',
+  portfolio: 'inv_portfolio',
+  profile:   'inv_profile',
+  analyses:  'inv_analyses',
+  setup:     'inv_setup_done',
+};
+
+const store = {
+  get: k => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  clear: () => { Object.values(KEYS).forEach(k => localStorage.removeItem(k)); },
+};
+
+// ── DEFAULT EMPTY PORTFOLIO TEMPLATE ────────────────────────────────────────
+const EMPTY_PORTFOLIO = [
+  { id: 'a1', name: '', type: 'Fundo',        subtype: '', currency: 'BRL', invested: 0, current: 0, income: 0, returnPct: 0, returnType: 'gain', detail: '', risk: 'Risco Baixo',  maturity: '' },
+  { id: 'a2', name: '', type: 'Fundo',        subtype: '', currency: 'BRL', invested: 0, current: 0, income: 0, returnPct: 0, returnType: 'gain', detail: '', risk: 'Risco Alto',   maturity: '' },
+  { id: 'a3', name: '', type: 'Renda Fixa',   subtype: '', currency: 'BRL', invested: 0, current: 0, income: 0, returnPct: 0, returnType: 'gain', detail: '', risk: 'Risco Médio',  maturity: '' },
+  { id: 'a4', name: '', type: 'FII',          subtype: '', currency: 'BRL', invested: 0, current: 0, income: 0, returnPct: 0, returnType: 'gain', detail: '', risk: 'Risco Alto',   maturity: '' },
+  { id: 'a5', name: '', type: 'Internacional', subtype: '', currency: 'USD', invested: 0, current: 0, income: 0, returnPct: 0, returnType: 'gain', detail: '', risk: 'Risco Médio', maturity: '' },
+];
+
+const DEFAULT_PROFILE = {
+  name: '',
+  risk: 'Moderado',
+  horizon: 'Longo prazo (5+ anos)',
+  monthlyExpense: 0,
+  emergencyGoal: 0,
+  monthlyContribution: 0,
+};
+
+// ── COLORS ───────────────────────────────────────────────────────────────────
+const TYPE_COLOR = {
+  'Fundo': '#38bdf8',
+  'Renda Fixa': '#4ade80',
+  'FII': '#fb923c',
+  'Internacional': '#c084fc',
+};
+const RISK_COLOR = {
+  'Risco Baixo': '#4ade80',
+  'Risco Médio': '#fbbf24',
+  'Risco Alto': '#f87171',
+};
+
+// ── FORMATTERS ────────────────────────────────────────────────────────────────
+const brl = n => `R$ ${Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+const usd = n => `US$ ${Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+const pct = n => `${n > 0 ? '+' : ''}${Number(n).toFixed(2)}%`;
+
+function getWeekLabel() {
+  const now = new Date();
+  const mon = new Date(now); mon.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  const f = d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+  return `${f(mon)} – ${f(sun)}`;
+}
+function getCurrentMonth() {
+  return new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+}
+function isQuarterStart() {
+  return [0,3,6,9].includes(new Date().getMonth());
+}
+
+// ── PROMPTS ───────────────────────────────────────────────────────────────────
+function buildPrompts(profile, portfolio) {
+  const portfolioText = portfolio
+    .filter(p => p.name)
+    .map(p => {
+      const curr = p.currency === 'USD' ? usd(p.current) : brl(p.current);
+      const inv  = p.currency === 'USD' ? usd(p.invested) : brl(p.invested);
+      const ret  = p.returnPct != null ? pct(p.returnPct) : '';
+      return `- ${p.name} (${p.type}/${p.subtype}): investido ${inv} → atual ${curr} | ${ret} | ${p.detail}`;
+    }).join('\n');
+
+  const ctx = `Perfil: ${profile.risk}, horizonte ${profile.horizon}, despesa mensal ${brl(profile.monthlyExpense)}, aporte mensal ${brl(profile.monthlyContribution)}, meta reserva ${brl(profile.emergencyGoal)}.`;
+
+  return {
+    briefing: `Você é um analista de investimentos sênior explicando para um investidor iniciante. Faça o briefing semanal (${getWeekLabel()}) para o seguinte perfil:\n\n${ctx}\n\nCARTEIRA REAL:\n${portfolioText}\n\nAnalise em linguagem simples e didática:\n\n**1. O que está acontecendo no mercado esta semana**\nExplique Selic, petróleo, câmbio de forma simples, com analogias.\n\n**2. Como cada investimento está se saindo**\nUse 🟢 baixo risco / 🟡 atenção / 🔴 risco alto. Mencione a performance real de cada ativo.\n\n**3. O que monitorar esta semana**\n2-3 alertas práticos.\n\n**4. Sugestões de realocação**\nSeja direto: o que vale vender ou trocar? Explique prós e contras em linguagem acessível.\n\nRespondaem português brasileiro. Didático, direto e honesto.`,
+
+    aporte: `Você é um planejador financeiro sênior. Investidor iniciante com o seguinte perfil:\n\n${ctx}\n\nCARTEIRA:\n${portfolioText}\n\nOriente o aporte de ${getCurrentMonth()} de forma simples:\n\n**1. O que fazer com o aporte este mês**\nProduto específico, onde contratar, por quê.\n\n**2. Progresso da reserva de emergência**\nQuanto falta e quando termina a fase.\n\n**3. O que vem depois da reserva**\nComo será a divisão dos aportes. Simples.\n\nPortuguês brasileiro. Sem jargões sem explicação.`,
+
+    rebalancing: `Você é um gestor de portfólio sênior. Balanceamento trimestral para investidor iniciante com o seguinte perfil:\n\n${ctx}\n\nCARTEIRA REAL:\n${portfolioText}\n\nAnalise de forma didática:\n\n**1. Saúde geral da carteira**\nQuem ganhou, quem perdeu?\n\n**2. Os maiores riscos hoje**\n🔴 alto / 🟡 moderado — com base nos dados reais.\n\n**3. O que manter, o que considerar vender**\nSeja direto. Com prós e contras.\n\n**4. Plano para os próximos 3 meses**\nO que fazer (ou não fazer) com a carteira.\n\n**5. Como está em relação ao ideal**\nComparação simples com carteira típica para o perfil.\n\nPortuguês brasileiro. Didático, honesto, acionável.`,
+  };
+}
+
+// ── AI CALL ───────────────────────────────────────────────────────────────────
+async function callAI(apiKey, prompt) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+    body: JSON.stringify({ model: 'claude-opus-4-5', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] }),
+  });
+  if (!res.ok) { const e = await res.json(); throw new Error(e.error?.message || res.status); }
+  const data = await res.json();
+  return data.content?.map(c => c.text || '').join('\n') || '';
+}
+
+// ── SMALL UI COMPONENTS ───────────────────────────────────────────────────────
+function Tag({ label, color }) {
+  return <span style={{ fontSize: 9, fontWeight: 700, color, background: `${color}18`, border: `1px solid ${color}28`, borderRadius: 3, padding: '2px 6px', textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", letterSpacing: '0.06em' }}>{label}</span>;
+}
+
+function SectionHeader({ icon, title, badge }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+      <span style={{ fontSize: 14 }}>{icon}</span>
+      <span style={{ color: '#94a3b8', fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", flex: 1 }}>{title}</span>
+      {badge && <span style={{ fontSize: 9, fontWeight: 700, color: badge.color, background: `${badge.color}18`, border: `1px solid ${badge.color}30`, borderRadius: 10, padding: '2px 8px', fontFamily: "'DM Mono', monospace", textTransform: 'uppercase' }}>{badge.label}</span>}
+    </div>
+  );
+}
+
+function ProgressBar({ value, max, color }) {
+  const p = Math.min(Math.max((value / max) * 100, 0), 100);
+  return (
+    <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 99, height: 6, overflow: 'hidden' }}>
+      <div style={{ width: `${p}%`, height: '100%', background: `linear-gradient(90deg, ${color}70, ${color})`, borderRadius: 99, transition: 'width 0.6s ease' }} />
+    </div>
+  );
+}
+
+function Skeleton() {
+  return (
+    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {[1,2,3].map(i => <div key={i} style={{ height: 52, borderRadius: 7, background: 'rgba(255,255,255,0.04)', animation: `pulse 1.4s ease-in-out ${i*0.15}s infinite` }} />)}
+    </div>
+  );
+}
+
+function AnalysisRenderer({ content }) {
+  const lines = content.split('\n').filter(l => l.trim());
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, animation: 'fadeIn 0.3s ease' }}>
+      {lines.map((line, i) => {
+        const isHeader = /^\*\*(.+)\*\*$/.test(line) || /^#{1,3}\s/.test(line);
+        const isRed = /🔴/.test(line); const isYel = /🟡/.test(line); const isGrn = /🟢/.test(line);
+        const isBullet = /^[-•*]\s/.test(line); const isNum = /^\d+\.\s/.test(line);
+        if (isHeader) {
+          const text = line.replace(/^\*\*|\*\*$/g,'').replace(/^#{1,3}\s/,'');
+          return <div key={i} style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 12, marginTop: 10, marginBottom: 2, fontFamily: "'DM Mono', monospace", borderLeft: '2px solid #38bdf8', paddingLeft: 8 }}>{text}</div>;
+        }
+        const bg = isRed ? 'rgba(239,68,68,0.07)' : isYel ? 'rgba(245,158,11,0.07)' : isGrn ? 'rgba(74,222,128,0.07)' : 'rgba(255,255,255,0.03)';
+        const border = isRed ? '#ef444428' : isYel ? '#f59e0b28' : isGrn ? '#4ade8028' : 'rgba(255,255,255,0.06)';
+        const text = (isBullet||isNum) ? '→ '+line.replace(/^[-•*]\s/,'').replace(/^\d+\.\s/,'') : line;
+        return <div key={i} style={{ background: bg, border: `1px solid ${border}`, borderRadius: 7, padding: '9px 13px', color: '#cbd5e1', fontSize: 12, lineHeight: 1.7 }}>{text}</div>;
+      })}
+    </div>
+  );
+}
+
+// ── ANALYSIS PANEL ────────────────────────────────────────────────────────────
+function AnalysisPanel({ tabKey, color, chatCommand, savedContent, onSave, apiKey, prompt }) {
+  const [mode, setMode] = useState('choose');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [pasteText, setPasteText] = useState('');
+  const hasContent = !!savedContent;
+
+  async function handleAutoGenerate() {
+    if (!apiKey) { setError('Configure sua API key nas Configurações primeiro.'); return; }
+    setMode('api'); setLoading(true); setError(null);
+    try {
+      const result = await callAI(apiKey, prompt);
+      onSave(result);
+      setMode('choose');
+    } catch (e) {
+      setError(`Erro: ${e.message}`);
+      setMode('choose');
+    } finally { setLoading(false); }
+  }
+
+  if (loading) return <Skeleton />;
+
+  if (hasContent && mode === 'choose') return (
+    <div>
+      <AnalysisRenderer content={savedContent} />
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button onClick={() => { onSave(''); setMode('choose'); }} style={btnStyle('#475569', 'rgba(255,255,255,0.03)', 'rgba(255,255,255,0.08)')}>🔄 Nova análise</button>
+        <button onClick={() => { setPasteText(savedContent); setMode('paste'); }} style={{ ...btnStyle('#475569','rgba(255,255,255,0.03)','rgba(255,255,255,0.08)'), flex: 'unset', padding: '9px 12px' }}>✏️</button>
+      </div>
+    </div>
+  );
+
+  if (mode === 'paste') return (
+    <div>
+      <div style={{ color: '#475569', fontSize: 11, marginBottom: 8, lineHeight: 1.5 }}>
+        No chat do Claude, digite <strong style={{ color, fontFamily: "'DM Mono', monospace" }}>"{chatCommand}"</strong> e cole abaixo:
+      </div>
+      <textarea autoFocus value={pasteText} onChange={e => setPasteText(e.target.value)} placeholder="Cole aqui o texto gerado no chat..."
+        style={{ width: '100%', minHeight: 160, background: 'rgba(255,255,255,0.04)', border: `1px solid ${color}40`, borderRadius: 10, padding: '12px 14px', color: '#e2e8f0', fontSize: 12, lineHeight: 1.6, resize: 'vertical', fontFamily: "'DM Mono', monospace", outline: 'none' }} />
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button onClick={() => { onSave(pasteText); setMode('choose'); }} style={btnStyle(color, `${color}15`, `${color}40`)}>✓ Visualizar</button>
+        <button onClick={() => { setPasteText(''); setMode('choose'); }} style={{ ...btnStyle('#f87171','rgba(239,68,68,0.1)','rgba(239,68,68,0.25)'), flex: 'unset', padding: '10px 14px' }}>✕</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {error && <div style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '10px 13px', color: '#f87171', fontSize: 11 }}>⚠️ {error}</div>}
+      <button onClick={handleAutoGenerate} style={{ width: '100%', padding: '14px 16px', borderRadius: 10, background: `${color}12`, border: `1px solid ${color}40`, color, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: "'DM Mono', monospace", textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 18 }}>⚡</span>
+        <div><div>Gerar automaticamente</div><div style={{ fontSize: 10, color: `${color}70`, fontWeight: 400, marginTop: 2 }}>Usa sua API key da Anthropic</div></div>
+      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
+        <span style={{ color: '#334155', fontSize: 10, fontFamily: "'DM Mono', monospace" }}>ou</span>
+        <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
+      </div>
+      <button onClick={() => { setPasteText(''); setMode('paste'); }} style={{ width: '100%', padding: '14px 16px', borderRadius: 10, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', color: '#64748b', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: "'DM Mono', monospace", textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 18 }}>📋</span>
+        <div><div>Colar análise do chat</div><div style={{ fontSize: 10, color: '#334155', fontWeight: 400, marginTop: 2 }}>Digite <span style={{ color, fontFamily: "'DM Mono', monospace" }}>"{chatCommand}"</span> no Claude</div></div>
+      </button>
+    </div>
+  );
+}
+
+function btnStyle(color, bg, border) {
+  return { flex: 1, padding: '9px', borderRadius: 8, background: bg, border: `1px solid ${border}`, color, fontSize: 11, cursor: 'pointer', fontFamily: "'DM Mono', monospace" };
+}
+
+// ── PORTFOLIO TAB ─────────────────────────────────────────────────────────────
+function PortfolioTab({ portfolio, profile }) {
+  const brlItems = portfolio.filter(p => p.currency === 'BRL' && p.name);
+  const usdItems = portfolio.filter(p => p.currency === 'USD' && p.name);
+  const totalInvBRL = brlItems.reduce((s,p) => s + Number(p.invested), 0);
+  const totalCurBRL = brlItems.reduce((s,p) => s + Number(p.current), 0);
+  const totalInvUSD = usdItems.reduce((s,p) => s + Number(p.invested), 0);
+  const totalCurUSD = usdItems.reduce((s,p) => s + Number(p.current), 0);
+  const gainBRL = totalCurBRL - totalInvBRL;
+  const gainPctBRL = totalInvBRL > 0 ? ((gainBRL / totalInvBRL) * 100).toFixed(1) : '0.0';
+
+  return (
+    <div>
+      <SectionHeader icon="🗂" title="Carteira — Performance Real" />
+      <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+          <div><div style={{ color: '#475569', fontSize: 10, marginBottom: 3 }}>Total investido BRL</div><div style={{ color: '#94a3b8', fontFamily: "'DM Mono', monospace", fontSize: 13 }}>{brl(totalInvBRL)}</div></div>
+          <div style={{ textAlign: 'right' }}><div style={{ color: '#475569', fontSize: 10, marginBottom: 3 }}>Posição atual BRL</div><div style={{ color: '#f1f5f9', fontFamily: "'DM Mono', monospace", fontSize: 13, fontWeight: 700 }}>{brl(totalCurBRL)}</div></div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <span style={{ color: '#475569', fontSize: 11 }}>Resultado BRL</span>
+          <span style={{ color: gainBRL >= 0 ? '#4ade80' : '#f87171', fontFamily: "'DM Mono', monospace", fontSize: 13, fontWeight: 700 }}>{gainBRL >= 0 ? '+' : ''}{brl(gainBRL)} ({gainBRL >= 0 ? '+' : ''}{gainPctBRL}%)</span>
+        </div>
+        {totalInvUSD > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+            <span style={{ color: '#475569', fontSize: 11 }}>Posição USD</span>
+            <span style={{ color: '#c084fc', fontFamily: "'DM Mono', monospace", fontSize: 12 }}>{usd(totalCurUSD)} ({totalInvUSD > 0 ? pct(((totalCurUSD-totalInvUSD)/totalInvUSD)*100) : ''})</span>
+          </div>
+        )}
+      </div>
+      {portfolio.filter(p => p.name).map(p => {
+        const color = TYPE_COLOR[p.type] || '#888';
+        const riskColor = RISK_COLOR[p.risk] || '#888';
+        const gain = Number(p.current) - Number(p.invested);
+        const gainLabel = p.currency === 'USD' ? `${gain >= 0 ? '+' : ''}${usd(Math.abs(gain))}` : `${gain >= 0 ? '+' : '-'}${brl(Math.abs(gain))}`;
+        const isLoss = Number(p.returnPct) < 0;
+        const retColor = isLoss ? '#f87171' : '#4ade80';
+        return (
+          <div key={p.id} style={{ background: `${color}06`, border: `1px solid ${color}18`, borderRadius: 10, padding: '12px 14px', marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 600, marginBottom: 4, lineHeight: 1.3 }}>{p.name}</div>
+                <div style={{ display: 'flex', gap: 5 }}><Tag label={p.type} color={color} /><Tag label={p.risk} color={riskColor} /></div>
+              </div>
+              <div style={{ textAlign: 'right', marginLeft: 10 }}>
+                <div style={{ color, fontWeight: 700, fontSize: 14, fontFamily: "'DM Mono', monospace" }}>{p.currency === 'USD' ? usd(p.current) : brl(p.current)}</div>
+                <div style={{ color: retColor, fontSize: 11, fontFamily: "'DM Mono', monospace", marginTop: 2 }}>{pct(p.returnPct)}</div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 6, padding: '7px 10px' }}>
+                <div style={{ color: '#475569', fontSize: 9, textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", marginBottom: 2 }}>Investido</div>
+                <div style={{ color: '#94a3b8', fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{p.currency === 'USD' ? usd(p.invested) : brl(p.invested)}</div>
+              </div>
+              <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 6, padding: '7px 10px' }}>
+                <div style={{ color: '#475569', fontSize: 9, textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", marginBottom: 2 }}>Ganho/Perda</div>
+                <div style={{ color: retColor, fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{gainLabel}</div>
+              </div>
+            </div>
+            {p.detail && <div style={{ marginTop: 6, background: 'rgba(0,0,0,0.15)', borderRadius: 6, padding: '6px 10px', color: '#64748b', fontSize: 11 }}>{p.detail}</div>}
+            {p.maturity && <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#334155', fontSize: 10 }}>Vencimento</span><span style={{ color: '#64748b', fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{p.maturity}</span></div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── SETUP SCREEN ──────────────────────────────────────────────────────────────
+function SetupScreen({ onComplete }) {
+  const [step, setStep] = useState(0); // 0=welcome, 1=profile, 2=apikey, 3=portfolio
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [apiKey, setApiKey] = useState('');
+  const [portfolio, setPortfolio] = useState(EMPTY_PORTFOLIO);
+
+  function saveAndFinish() {
+    store.set(KEYS.profile, profile);
+    store.set(KEYS.apiKey, apiKey);
+    store.set(KEYS.portfolio, portfolio);
+    store.set(KEYS.setup, true);
+    onComplete();
+  }
+
+  const inp = (style) => ({ ...style, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '10px 12px', color: '#f1f5f9', fontSize: 13, outline: 'none', width: '100%' });
+
+  if (step === 0) return (
+    <div style={{ minHeight: '100vh', background: '#080d18', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '32px 24px', animation: 'slideUp 0.4s ease' }}>
+      <div style={{ fontSize: 48, marginBottom: 24 }}>📊</div>
+      <div style={{ color: '#38bdf8', fontSize: 10, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", marginBottom: 12 }}>PAINEL DE INVESTIMENTOS</div>
+      <div style={{ color: '#f8fafc', fontSize: 24, fontWeight: 800, textAlign: 'center', lineHeight: 1.3, marginBottom: 16 }}>Seus dados ficam<br/>só no seu iPhone</div>
+      <div style={{ color: '#475569', fontSize: 13, textAlign: 'center', lineHeight: 1.7, marginBottom: 40, maxWidth: 320 }}>
+        Nenhuma informação financeira é enviada para servidores. Tudo fica salvo localmente no seu dispositivo.
+      </div>
+      <button onClick={() => setStep(1)} style={{ width: '100%', maxWidth: 320, padding: '16px', borderRadius: 12, background: 'linear-gradient(135deg, #38bdf8, #818cf8)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
+        Começar configuração →
+      </button>
+    </div>
+  );
+
+  if (step === 1) return (
+    <div style={{ minHeight: '100vh', background: '#080d18', padding: '48px 24px 32px', animation: 'slideUp 0.3s ease' }}>
+      <div style={{ color: '#38bdf8', fontSize: 9, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", marginBottom: 8 }}>PASSO 1 DE 3</div>
+      <div style={{ color: '#f8fafc', fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Seu perfil</div>
+      <div style={{ color: '#475569', fontSize: 12, marginBottom: 28 }}>Dados usados para personalizar as análises</div>
+
+      {[
+        { label: 'Seu nome', key: 'name', type: 'text', placeholder: 'Ex: Lucas' },
+        { label: 'Despesa mensal (R$)', key: 'monthlyExpense', type: 'number', placeholder: 'Ex: 20000' },
+        { label: 'Meta da reserva de emergência (R$)', key: 'emergencyGoal', type: 'number', placeholder: 'Ex: 120000' },
+        { label: 'Aporte mensal (R$)', key: 'monthlyContribution', type: 'number', placeholder: 'Ex: 10000' },
+      ].map(f => (
+        <div key={f.key} style={{ marginBottom: 16 }}>
+          <label style={{ color: '#94a3b8', fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Mono', monospace" }}>{f.label}</label>
+          <input type={f.type} placeholder={f.placeholder} value={profile[f.key]} onChange={e => setProfile(p => ({ ...p, [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value }))} style={inp({})} />
+        </div>
+      ))}
+
+      <div style={{ marginBottom: 24 }}>
+        <label style={{ color: '#94a3b8', fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Mono', monospace" }}>Perfil de risco</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {['Conservador','Moderado','Arrojado'].map(r => (
+            <button key={r} onClick={() => setProfile(p => ({ ...p, risk: r }))} style={{ flex: 1, padding: '10px 4px', borderRadius: 8, background: profile.risk === r ? 'rgba(56,189,248,0.15)' : 'rgba(255,255,255,0.03)', border: `1px solid ${profile.risk === r ? '#38bdf8' : 'rgba(255,255,255,0.08)'}`, color: profile.risk === r ? '#38bdf8' : '#475569', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>{r}</button>
+          ))}
+        </div>
+      </div>
+
+      <button onClick={() => setStep(2)} style={{ width: '100%', padding: '14px', borderRadius: 12, background: '#38bdf8', border: 'none', color: '#080d18', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Próximo →</button>
+    </div>
+  );
+
+  if (step === 2) return (
+    <div style={{ minHeight: '100vh', background: '#080d18', padding: '48px 24px 32px', animation: 'slideUp 0.3s ease' }}>
+      <div style={{ color: '#38bdf8', fontSize: 9, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", marginBottom: 8 }}>PASSO 2 DE 3</div>
+      <div style={{ color: '#f8fafc', fontSize: 20, fontWeight: 800, marginBottom: 4 }}>API Key da Anthropic</div>
+      <div style={{ color: '#475569', fontSize: 12, marginBottom: 24, lineHeight: 1.6 }}>Necessária para o botão "Gerar automaticamente". Fica salva apenas no seu iPhone, nunca é enviada a outro servidor.</div>
+
+      <div style={{ background: 'rgba(56,189,248,0.06)', border: '1px solid rgba(56,189,248,0.2)', borderRadius: 10, padding: '14px', marginBottom: 20, fontSize: 12, color: '#64748b', lineHeight: 1.7 }}>
+        <strong style={{ color: '#38bdf8' }}>Como obter:</strong><br/>
+        1. Acesse <strong style={{ color: '#94a3b8' }}>console.anthropic.com</strong><br/>
+        2. Faça login ou crie uma conta<br/>
+        3. Vá em "API Keys" → "Create Key"<br/>
+        4. Copie a chave (começa com <span style={{ fontFamily: "'DM Mono', monospace", color: '#94a3b8' }}>sk-ant-</span>)<br/>
+        5. Cole abaixo
+      </div>
+
+      <div style={{ marginBottom: 20 }}>
+        <label style={{ color: '#94a3b8', fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Mono', monospace" }}>Sua API Key</label>
+        <input type="password" placeholder="sk-ant-..." value={apiKey} onChange={e => setApiKey(e.target.value)} style={inp({ fontFamily: "'DM Mono', monospace" })} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={() => setStep(3)} style={{ flex: 1, padding: '14px', borderRadius: 12, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#475569', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Pular por agora</button>
+        <button onClick={() => setStep(3)} disabled={!apiKey.startsWith('sk-ant-')} style={{ flex: 2, padding: '14px', borderRadius: 12, background: apiKey.startsWith('sk-ant-') ? '#38bdf8' : 'rgba(56,189,248,0.2)', border: 'none', color: apiKey.startsWith('sk-ant-') ? '#080d18' : '#334155', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Salvar e continuar →</button>
+      </div>
+    </div>
+  );
+
+  if (step === 3) return (
+    <div style={{ minHeight: '100vh', background: '#080d18', padding: '48px 24px 32px', animation: 'slideUp 0.3s ease', overflowY: 'auto' }}>
+      <div style={{ color: '#38bdf8', fontSize: 9, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", marginBottom: 8 }}>PASSO 3 DE 3</div>
+      <div style={{ color: '#f8fafc', fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Sua carteira</div>
+      <div style={{ color: '#475569', fontSize: 12, marginBottom: 20, lineHeight: 1.6 }}>Preencha os ativos que você possui. Você pode editar depois.</div>
+
+      {portfolio.map((p, i) => (
+        <div key={p.id} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: '14px', marginBottom: 12 }}>
+          <div style={{ color: '#64748b', fontSize: 10, fontWeight: 700, fontFamily: "'DM Mono', monospace", textTransform: 'uppercase', marginBottom: 10 }}>Ativo {i+1}</div>
+          {[
+            { label: 'Nome do ativo', key: 'name', type: 'text', placeholder: 'Ex: Porto Seguro FIRF DI' },
+            { label: 'Tipo', key: 'type', type: 'select', opts: ['Fundo','Renda Fixa','FII','Internacional'] },
+            { label: 'Subtipo', key: 'subtype', type: 'text', placeholder: 'Ex: CRA, FIP-IE, Bonds...' },
+            { label: 'Moeda', key: 'currency', type: 'select', opts: ['BRL','USD'] },
+            { label: 'Valor investido', key: 'invested', type: 'number', placeholder: '0' },
+            { label: 'Posição atual', key: 'current', type: 'number', placeholder: '0' },
+            { label: 'Rentabilidade %', key: 'returnPct', type: 'number', placeholder: '0' },
+            { label: 'Risco', key: 'risk', type: 'select', opts: ['Risco Baixo','Risco Médio','Risco Alto'] },
+            { label: 'Detalhe (proventos, rendimento...)', key: 'detail', type: 'text', placeholder: 'Ex: +R$ 1.200 em proventos' },
+            { label: 'Vencimento (se houver)', key: 'maturity', type: 'text', placeholder: 'Ex: 17/02/2031' },
+          ].map(f => (
+            <div key={f.key} style={{ marginBottom: 10 }}>
+              <label style={{ color: '#475569', fontSize: 10, display: 'block', marginBottom: 4 }}>{f.label}</label>
+              {f.type === 'select'
+                ? <select value={p[f.key]} onChange={e => { const np = [...portfolio]; np[i] = { ...np[i], [f.key]: e.target.value }; setPortfolio(np); }} style={{ ...inp({}), appearance: 'none' }}>
+                    {f.opts.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                : <input type={f.type} placeholder={f.placeholder} value={p[f.key]} onChange={e => { const np = [...portfolio]; np[i] = { ...np[i], [f.key]: f.type === 'number' ? Number(e.target.value) : e.target.value }; setPortfolio(np); }} style={inp({})} />
+              }
+            </div>
+          ))}
+        </div>
+      ))}
+
+      <button onClick={() => setPortfolio(p => [...p, { ...EMPTY_PORTFOLIO[0], id: `a${Date.now()}` }])} style={{ width: '100%', padding: '12px', borderRadius: 10, background: 'rgba(255,255,255,0.03)', border: '1px dashed rgba(255,255,255,0.12)', color: '#475569', fontSize: 12, cursor: 'pointer', marginBottom: 16 }}>+ Adicionar ativo</button>
+
+      <button onClick={saveAndFinish} style={{ width: '100%', padding: '16px', borderRadius: 12, background: 'linear-gradient(135deg, #38bdf8, #818cf8)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>Salvar e abrir o painel ✓</button>
+    </div>
+  );
+}
+
+// ── SETTINGS SCREEN ───────────────────────────────────────────────────────────
+function SettingsScreen({ onBack, onReset }) {
+  const [apiKey, setApiKey] = useState(store.get(KEYS.apiKey) || '');
+  const [saved, setSaved] = useState(false);
+
+  function saveKey() {
+    store.set(KEYS.apiKey, apiKey);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  const inp = (style) => ({ ...style, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '10px 12px', color: '#f1f5f9', fontSize: 13, outline: 'none', width: '100%', fontFamily: "'DM Mono', monospace" });
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#080d18', padding: '48px 24px 32px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
+        <button onClick={onBack} style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: 20, cursor: 'pointer' }}>←</button>
+        <div style={{ color: '#f8fafc', fontSize: 18, fontWeight: 700 }}>Configurações</div>
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <label style={{ color: '#94a3b8', fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'DM Mono', monospace" }}>API Key da Anthropic</label>
+        <input type="password" placeholder="sk-ant-..." value={apiKey} onChange={e => setApiKey(e.target.value)} style={inp({})} />
+        <button onClick={saveKey} style={{ width: '100%', marginTop: 8, padding: '12px', borderRadius: 8, background: saved ? 'rgba(74,222,128,0.15)' : 'rgba(56,189,248,0.15)', border: `1px solid ${saved ? '#4ade80' : '#38bdf8'}40`, color: saved ? '#4ade80' : '#38bdf8', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          {saved ? '✓ Salvo!' : 'Salvar API Key'}
+        </button>
+      </div>
+
+      <div style={{ background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 10, padding: '14px' }}>
+        <div style={{ color: '#f87171', fontSize: 12, fontWeight: 700, marginBottom: 8 }}>⚠️ Redefinir tudo</div>
+        <div style={{ color: '#475569', fontSize: 11, marginBottom: 12, lineHeight: 1.6 }}>Apaga todos os dados salvos no dispositivo. Você precisará configurar novamente.</div>
+        <button onClick={() => { if (window.confirm('Tem certeza? Todos os dados serão apagados.')) { store.clear(); onReset(); } }} style={{ width: '100%', padding: '10px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Redefinir tudo</button>
+      </div>
+    </div>
+  );
+}
+
+// ── MAIN APP ──────────────────────────────────────────────────────────────────
+const TABS = [
+  { id: 'briefing',    label: 'Briefing',  icon: '📊', color: '#38bdf8', cmd: 'gerar briefing desta semana' },
+  { id: 'aporte',      label: 'Aporte',    icon: '💰', color: '#4ade80', cmd: 'orientação de aporte do mês' },
+  { id: 'rebalancing', label: 'Balanc.',   icon: '⚖️', color: '#fb923c', cmd: 'balanceamento trimestral da carteira' },
+  { id: 'portfolio',   label: 'Carteira',  icon: '🗂', color: '#94a3b8', cmd: '' },
+];
+
+function App() {
+  const [ready, setReady] = useState(false);
+  const [screen, setScreen] = useState('main'); // main | settings
+  const [tab, setTab] = useState('briefing');
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [portfolio, setPortfolio] = useState([]);
+  const [apiKey, setApiKey] = useState('');
+  const [analyses, setAnalyses] = useState({ briefing: '', aporte: '', rebalancing: '' });
+
+  useEffect(() => {
+    const setupDone = store.get(KEYS.setup);
+    if (setupDone) {
+      setProfile(store.get(KEYS.profile) || DEFAULT_PROFILE);
+      setPortfolio(store.get(KEYS.portfolio) || []);
+      setApiKey(store.get(KEYS.apiKey) || '');
+      setAnalyses(store.get(KEYS.analyses) || { briefing: '', aporte: '', rebalancing: '' });
+    }
+    setReady(true);
+  }, []);
+
+  function handleSetupComplete() {
+    setProfile(store.get(KEYS.profile) || DEFAULT_PROFILE);
+    setPortfolio(store.get(KEYS.portfolio) || []);
+    setApiKey(store.get(KEYS.apiKey) || '');
+    setReady(true);
+  }
+
+  function saveAnalysis(key, value) {
+    const updated = { ...analyses, [key]: value };
+    setAnalyses(updated);
+    store.set(KEYS.analyses, updated);
+  }
+
+  if (!ready) return null;
+  if (!store.get(KEYS.setup)) return <SetupScreen onComplete={handleSetupComplete} />;
+  if (screen === 'settings') return <SettingsScreen onBack={() => { setApiKey(store.get(KEYS.apiKey)||''); setScreen('main'); }} onReset={() => { setReady(false); setTimeout(() => setReady(true), 50); }} />;
+
+  const prompts = buildPrompts(profile, portfolio);
+  const isQtr = isQuarterStart();
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#080d18', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div style={{ background: 'linear-gradient(180deg, rgba(56,189,248,0.07) 0%, transparent 100%)', borderBottom: '1px solid rgba(56,189,248,0.1)', padding: 'env(safe-area-inset-top, 0) 20px 0', paddingTop: `max(env(safe-area-inset-top), 16px)` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+          <div>
+            <div style={{ color: '#38bdf8', fontSize: 9, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', fontFamily: "'DM Mono', monospace", marginBottom: 5 }}>PAINEL DE INVESTIMENTOS</div>
+            <div style={{ color: '#f8fafc', fontSize: 20, fontWeight: 800, letterSpacing: '-0.02em' }}>{profile.name || 'Painel'}</div>
+            <div style={{ color: '#1e293b', fontSize: 11, fontFamily: "'DM Mono', monospace", marginTop: 2 }}>{getWeekLabel()}</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
+            <span style={{ background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.25)', borderRadius: 5, padding: '3px 9px', color: '#4ade80', fontSize: 9, fontWeight: 700, fontFamily: "'DM Mono', monospace", textTransform: 'uppercase' }}>{profile.risk}</span>
+            <button onClick={() => setScreen('settings')} style={{ background: 'none', border: 'none', color: '#334155', fontSize: 16, cursor: 'pointer', padding: '2px 0' }}>⚙️</button>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 2 }}>
+          {TABS.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, padding: '9px 4px', background: 'transparent', border: 'none', borderBottom: `2px solid ${tab === t.id ? t.color : 'transparent'}`, color: tab === t.id ? t.color : '#334155', fontSize: 10, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}>
+              <div style={{ fontSize: 13 }}>{t.icon}</div>
+              <div style={{ marginTop: 2 }}>{t.label}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, padding: '20px 18px 40px', overflowY: 'auto', animation: 'fadeIn 0.2s ease' }}>
+
+        {tab === 'briefing' && (
+          <div>
+            <SectionHeader icon="📊" title="Briefing Semanal" badge={{ label: 'Toda segunda', color: '#38bdf8' }} />
+            <AnalysisPanel tabKey="briefing" color="#38bdf8" chatCommand="gerar briefing desta semana" savedContent={analyses.briefing} onSave={v => saveAnalysis('briefing', v)} apiKey={apiKey} prompt={prompts.briefing} />
+          </div>
+        )}
+
+        {tab === 'aporte' && (
+          <div>
+            <SectionHeader icon="💰" title={`Aporte — ${getCurrentMonth()}`} badge={{ label: `${brl(profile.monthlyContribution)}`, color: '#4ade80' }} />
+            {profile.emergencyGoal > 0 && (
+              <div style={{ background: 'rgba(251,146,60,0.07)', border: '1px solid rgba(251,146,60,0.25)', borderRadius: 9, padding: '12px 14px', marginBottom: 14 }}>
+                <div style={{ color: '#fb923c', fontSize: 11, fontWeight: 700, fontFamily: "'DM Mono', monospace", marginBottom: 4 }}>⚠️ FASE ATIVA — RESERVA DE EMERGÊNCIA</div>
+                <div style={{ color: '#475569', fontSize: 11, lineHeight: 1.55 }}>Meta: <strong style={{ color: '#fb923c' }}>{brl(profile.emergencyGoal)}</strong> · Selic em queda gradual → CDB liquidez diária é o destino ideal agora.</div>
+              </div>
+            )}
+            <AnalysisPanel tabKey="aporte" color="#4ade80" chatCommand="orientação de aporte do mês" savedContent={analyses.aporte} onSave={v => saveAnalysis('aporte', v)} apiKey={apiKey} prompt={prompts.aporte} />
+          </div>
+        )}
+
+        {tab === 'rebalancing' && (
+          <div>
+            <SectionHeader icon="⚖️" title="Balanceamento Trimestral" badge={{ label: isQtr ? 'Mês de revisão ✓' : 'Jan/Abr/Jul/Out', color: isQtr ? '#fb923c' : '#334155' }} />
+            <div style={{ background: isQtr ? 'rgba(251,146,60,0.07)' : 'rgba(255,255,255,0.02)', border: `1px solid ${isQtr ? 'rgba(251,146,60,0.25)' : 'rgba(255,255,255,0.07)'}`, borderRadius: 9, padding: '11px 14px', marginBottom: 14, fontSize: 11, color: '#64748b', lineHeight: 1.55 }}>
+              {isQtr ? '📅 Mês de revisão trimestral — ideal para gerar agora.' : '📅 Revisões em Janeiro, Abril, Julho e Outubro.'}
+            </div>
+            <AnalysisPanel tabKey="rebalancing" color="#fb923c" chatCommand="balanceamento trimestral da carteira" savedContent={analyses.rebalancing} onSave={v => saveAnalysis('rebalancing', v)} apiKey={apiKey} prompt={prompts.rebalancing} />
+          </div>
+        )}
+
+        {tab === 'portfolio' && <PortfolioTab portfolio={portfolio} profile={profile} />}
+
+        <div style={{ color: '#0f172a', fontSize: 9, textAlign: 'center', marginTop: 24, fontFamily: "'DM Mono', monospace" }}>
+          Análises informativas · Não constituem recomendação de investimento
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
